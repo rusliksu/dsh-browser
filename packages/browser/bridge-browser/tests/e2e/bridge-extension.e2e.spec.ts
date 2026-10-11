@@ -96,6 +96,7 @@ beforeAll(async () => {
     executablePath: executable,
     channel: 'chromium',
     headless: true,
+    locale: 'en-US',
     args: [
       `--disable-extensions-except=${EXTENSION_DIR}`,
       `--load-extension=${EXTENSION_DIR}`,
@@ -130,15 +131,15 @@ describe('extension ↔ migrated bridge smoke', () => {
     await panel.goto(`chrome-extension://${extensionId}/panel/index.html`)
     await panel.waitForSelector('header.topbar', { timeout: 15_000 })
 
-    await panel.click('button[aria-label="打开设置"]')
-    await panel.fill('input[placeholder*="自动检测"]', `ws://127.0.0.1:${String(port)}`)
+    await panel.click('button[aria-label="Open settings"]')
+    await panel.fill('input[placeholder*="Auto-detect"]', `ws://127.0.0.1:${String(port)}`)
     await panel.fill('input[type="password"]', TOKEN)
-    await panel.click('text=保存并连接')
+    await panel.click('text=Save & Connect')
 
     await expect.poll(
       () => panel.locator('.connection').textContent(),
       { timeout: 30_000 },
-    ).toContain('已连接')
+    ).toContain('Connected')
     await expect.poll(
       () => calls.some(request => request.method === 'session.history'),
       { timeout: 15_000 },

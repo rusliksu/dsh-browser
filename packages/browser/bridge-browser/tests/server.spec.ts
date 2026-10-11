@@ -9,7 +9,7 @@ import type { BrowserHostApi, HostEventFrame } from '../src/host-api.ts'
 
 const TOKEN = 'deadbeefdeadbeefdeadbeefdeadbeef'
 
-/** 扩展上下文的 Origin（回环免 token 的必要条件）。 */
+/** Extension origin must never substitute for the configured pairing token. */
 const EXT_ORIGIN = 'chrome-extension://test-extension-id'
 const FIREFOX_EXT_ORIGIN = 'moz-extension://per-install-uuid'
 
@@ -129,11 +129,20 @@ describe('BridgeServer', () => {
     ws.close()
   })
 
-  it('accepts loopback connections without a token when Origin is an extension (zero-config mode)', async () => {
+  it.each(['', 'incorrect-token'])('rejects an unpaired Chrome extension with token %j', async (token) => {
+    const h = await startBridge()
+    harnesses.push(h)
+    const { ws, done } = await connect(h.url, EXT_ORIGIN)
+    send(ws, { t: 'hello', token, caps: CAPS })
+    await done
+    expect(ws.readyState).toBe(WebSocket.CLOSED)
+  })
+
+  it('accepts a Chrome extension after it presents the configured token', async () => {
     const h = await startBridge()
     harnesses.push(h)
     const { ws, frames } = await connect(h.url, EXT_ORIGIN)
-    send(ws, { t: 'hello', token: '', caps: CAPS })
+    send(ws, { t: 'hello', token: TOKEN, caps: CAPS })
     await waitFor(() => frames.some((f) => f.t === 'hello.ok'))
     expect(frames.find((f) => f.t === 'hello.ok')).toBeDefined()
     ws.close()
@@ -462,7 +471,7 @@ describe('BridgeServer', () => {
     const h = await startBridge()
     harnesses.push(h)
     const { ws, frames } = await connect(h.url, EXT_ORIGIN)
-    send(ws, { t: 'hello', token: '', caps: CAPS })
+    send(ws, { t: 'hello', token: TOKEN, caps: CAPS })
     await waitFor(() => frames.some((f) => f.t === 'hello.ok'))
     const abort = new AbortController()
     abort.abort()

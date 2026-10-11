@@ -15,6 +15,8 @@ Browser operation remains text-only: pages become structured text with a numbere
 
 ## Quick install
 
+Every extension connection requires a pairing key, including local Chrome connections. After installation, copy the key from `~/.dsh/ext-bridge-token` into the extension's Token setting. Automatic address discovery does not authenticate the extension.
+
 The standard `dsh plugin` command alone cannot install this project. The integration contains both a dsh bridge plugin and a browser extension. The one-line installer currently sets up the Chrome build.
 
 macOS and Linux:
@@ -183,7 +185,7 @@ If you encounter `cache.hydratePrepared is not a function`, update the repositor
 ## Security
 
 - The bridge path sits outside the `/api` trust boundary and performs its own bearer-token authentication.
-- Local Chrome extension origins retain zero-configuration loopback access; Firefox origins are per-install UUIDs and must present the bearer token.
+- Every extension origin must present the bearer token, including local Chrome and Firefox connections.
 - Privileged gateway methods such as `settings.*`, `credentials.*`, and `host.open*` reject non-loopback sources.
 - The browser-page pipeline is text-only and never captures screenshots; explicitly attached chat images use dsh's durable attachment service. Password and payment-card values never leave the page.
 - When work begins, the assistant binds to the active tab (at prompt submission, or at the first direct browser-tool call). If you switch tabs manually, later browser actions pause and the side panel asks whether the assistant should continue on the original tab or follow the new one. Choosing the original tab permits background operation; the extension never silently retargets or changes your visible tab. Closing the controlled tab also pauses tools until you explicitly select the current page.

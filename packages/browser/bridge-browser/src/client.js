@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
     const dictionaries = {
       zh: {
         'bridgeAddress.title': '浏览器桥地址',
-        'bridgeAddress.help': '粘贴到 Chrome 扩展「桥地址」设置；本机一般无需 Token。',
+        'bridgeAddress.help': '粘贴到扩展的「桥地址」设置，并在 Token 字段填写 ~/.dsh/ext-bridge-token 文件中的密钥。',
         'bridgeAddress.copy': '复制',
         'bridgeAddress.copied': '已复制',
         'bridgeAddress.loading': '正在读取…',
@@ -27,7 +27,7 @@ window.__ModuleLoader__.load({
       },
       en: {
         'bridgeAddress.title': 'Browser bridge address',
-        'bridgeAddress.help': 'Paste into the Chrome extension Bridge address setting. Loopback needs no token.',
+        'bridgeAddress.help': 'Paste into the extension Bridge address setting, then enter the key from ~/.dsh/ext-bridge-token in its Token field.',
         'bridgeAddress.copy': 'Copy',
         'bridgeAddress.copied': 'Copied',
         'bridgeAddress.loading': 'Loading…',

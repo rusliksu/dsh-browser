@@ -28,13 +28,14 @@ describe('token', () => {
     expect(verifyToken('deadbeef-team', 'deadbeef-team')).toBe(true)
   })
 
-  it('persists tokens with 0600 permissions and round-trips', async () => {
+  it('persists tokens and round-trips, with private POSIX permissions where supported', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-bridge-token-'))
     const file = join(dir, 'token')
     const token = generateToken()
     await writeTokenFile(token, file)
     expect((await readFile(file, 'utf8')).trim()).toBe(token)
-    expect((await stat(file)).mode & 0o777).toBe(0o600)
+    // Windows access is controlled by ACLs, not POSIX mode bits.
+    if (process.platform !== 'win32') expect((await stat(file)).mode & 0o777).toBe(0o600)
     const resolved = await resolveToken(undefined, file)
     expect(resolved.token).toBe(token)
     expect(resolved.generated).toBe(false)

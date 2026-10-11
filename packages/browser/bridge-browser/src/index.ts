@@ -237,8 +237,7 @@ function mountBridge(
 
   // Zero-config discovery endpoint: the extension fetches this to learn the
   // bridge WebSocket URL without any manual configuration. The URL carries no
-  // secret (loopback connections skip the token); non-loopback deployments
-  // keep requiring the token on the WS itself.
+  // secret; every connection must separately present the configured token.
   const configRoute: WebRoute = {
     kind: 'exact',
     path: BRIDGE_CONFIG_PATH,

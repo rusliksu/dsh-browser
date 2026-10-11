@@ -43,7 +43,7 @@ cd $HOME\.dsh\dsh-browser; pnpm start
 npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
-安装器会把已解压扩展复制到 `~/.dsh/browser-extension` 并打开 `chrome://extensions`。在 Chrome 中加载这个稳定目录，然后使用侧边栏。扩展会自动发现回环连接，无需输入 token；非回环部署仍需要配置的 bearer token。
+安装器会把已解压扩展复制到 `~/.dsh/browser-extension` 并打开 `chrome://extensions`。在 Chrome 中加载这个稳定目录，然后使用侧边栏。扩展会自动发现地址，但所有连接都必须在 Token 设置中填写 `~/.dsh/ext-bridge-token` 文件中的密钥。地址发现接口不会返回密钥。
 
 ## 安全模型
 
