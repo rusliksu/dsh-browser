@@ -43,7 +43,7 @@ The workspace pins dsh 0.2.0-rc.2, the minimum supported runtime. Older DSH rele
 npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
-The installer copies the unpacked extension to `~/.dsh/browser-extension` and opens `chrome://extensions`. Load that stable directory in Chrome and use the side panel. Loopback connections are discovered automatically and require no token entry; non-loopback deployments still require the configured bearer token.
+The installer copies the unpacked extension to `~/.dsh/browser-extension` and opens `chrome://extensions`. Load that stable directory in Chrome and use the side panel. The address is discovered automatically. Every connection, including local Chrome extensions, requires the bearer token: copy the key from `~/.dsh/ext-bridge-token` into the extension's Token setting. The discovery endpoint never returns this key.
 
 ## Security model
 

@@ -179,7 +179,7 @@ async function loadComposition(): Promise<{ ctx: Context; configPath: string; po
   return { ctx: context, configPath, port: web.port }
 }
 
-/** 扩展上下文 Origin（回环免 token 的必要条件）。 */
+/** Extension origin is separate from the required pairing token. */
 const EXT_ORIGIN = 'chrome-extension://test-extension-id'
 
 function connect(port: number): Promise<{
@@ -218,7 +218,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<voi
 
 async function connectReady(port: number): Promise<Awaited<ReturnType<typeof connect>>> {
   const client = await connect(port)
-  send(client.ws, { t: 'hello', token: '', caps: { textOnly: true, snapshotMaxChars: 32_000, maxInteractiveItems: 60 } })
+  send(client.ws, { t: 'hello', token: TOKEN, caps: { textOnly: true, snapshotMaxChars: 32_000, maxInteractiveItems: 60 } })
   await Promise.race([
     waitFor(() => client.frames.some((f) => f.t === 'hello.ok')),
     client.closed.then(({ code, reason }) => {
@@ -339,8 +339,7 @@ describe('real Loader composition', () => {
     expect(tools.get('browser_click')).toBeDefined()
     expect(tools.get('browser_navigate')).toBeDefined()
 
-    // Zero-config semantics: loopback connections need no token (the
-    // non-loopback token gate is covered by server.spec overrides).
+    // Address discovery discloses no secret; authentication remains required.
     const client = await connectReady(port)
     expect(client.frames.find((f) => f.t === 'hello.ok')).toEqual({
       t: 'hello.ok',

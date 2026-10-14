@@ -194,14 +194,16 @@ try {
   assert.ok((await rpc('session.list', {})).items.some(item => item.sessionId === sessionId))
   const reopened = (await rpc('session.history', { sessionId })).events
   assert.deepEqual(reopened.slice(0, history.events.length), history.events)
-  // Graceful disposal durably cancels the still-unclaimed browser snapshot.
-  // Its original V4 insertion must survive restart unchanged before that row.
+  // Node force-kills on Windows; POSIX SIGTERM also durably cancels the inbox.
+  // Both must preserve the original V4 history exactly across restart.
   const shutdown = reopened.slice(history.events.length)
-  assert.equal(shutdown.length, 1)
-  assert.equal(shutdown[0].event.type, 'agent/inbox/spliced')
-  assert.deepEqual(shutdown[0].event.data, {
-    target: 'next-step', start: 0, removedCount: 1, inserted: [], outcome: 'canceled',
-  })
+  assert.equal(shutdown.length, process.platform === 'win32' ? 0 : 1)
+  if (process.platform !== 'win32') {
+    assert.equal(shutdown[0].event.type, 'agent/inbox/spliced')
+    assert.deepEqual(shutdown[0].event.data, {
+      target: 'next-step', start: 0, removedCount: 1, inserted: [], outcome: 'canceled',
+    })
+  }
   const reopenedLegacy = await rpc('session.history', { sessionId: legacySessionId })
   // Following a cold Session activates it after the opening snapshot and may
   // append seed/permission metadata. The migrated history prefix stays exact.

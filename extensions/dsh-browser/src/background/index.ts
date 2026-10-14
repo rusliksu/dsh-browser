@@ -1224,7 +1224,7 @@ function cancelAllToolCalls(): void {
   activeToolCalls.clear()
 }
 
-/** (Re)start the bridge with the current settings. 零配置：地址留空时自动探测；回环连接无需 token。 */
+/** (Re)start the bridge with the current settings; discover an omitted address and authenticate with the configured token. */
 async function startBridge(): Promise<void> {
   const revision = ++bridgeStartRevision
   if (panelPorts.size === 0) return
