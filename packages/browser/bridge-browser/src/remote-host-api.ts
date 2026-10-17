@@ -9,6 +9,7 @@
  * @module @yuxianglin/dsh-bridge-browser/src/remote-host-api
  */
 
+import type { PeerScope } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   BrowserHostApi,
   HostEventFrame,
@@ -44,6 +45,7 @@ export interface TypertGatewayLike {
     readonly method: string
     readonly args: Readonly<Record<string, unknown>>
     readonly signal?: AbortSignal
+    readonly peer?: PeerScope
   }): Promise<unknown>
 }
 
@@ -65,18 +67,19 @@ const EMPTY_WIRE_UPLINK: AsyncIterable<unknown> = {
  *   these as three-arg maps AbortSignal onto uplink and leaves signal
  *   undefined (hello.ok → stream-failed → WS 1011).
  */
-function openWireStream(gateway: TypertGatewayLike, endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
+function openWireStream(gateway: TypertGatewayLike, endpoint: string, payload: unknown, signal: AbortSignal, peer?: PeerScope): Promise<AsyncIterable<unknown>> {
   const open = gateway.wireStream.open
   if (open.length === 3) {
     return open(endpoint, payload, signal)
   }
-  return open(endpoint, payload, EMPTY_WIRE_UPLINK, undefined, signal)
+  return open(endpoint, payload, EMPTY_WIRE_UPLINK, peer, signal)
 }
 
 /** Structural subset of dsh 0.2's Host Connection service. */
 export interface HostConnectionLike {
+  readonly browserPeer: PeerScope
   createSharedFetchHandler(channel: '/api'): {
-    fetch(request: Request): Promise<Response>
+    fetch(request: Request, peer: PeerScope): Promise<Response>
   }
 }
 
@@ -111,6 +114,8 @@ export function createRemoteHostApi(
 }
 
 class RemoteHostApi implements BrowserHostApi {
+  private readonly gateway: TypertGatewayLike
+  private readonly peer: PeerScope
   private readonly fetchHandler: ReturnType<HostConnectionLike['createSharedFetchHandler']>
   private readonly extensionSessions = new ExtensionSessionRegistry()
   /** Last known session/follow tip per Session; drives session/page throughSeq. */
@@ -118,9 +123,20 @@ class RemoteHostApi implements BrowserHostApi {
   private activeEvents: EventGeneration | undefined
 
   constructor(
-    private readonly gateway: TypertGatewayLike,
+    gateway: TypertGatewayLike,
     connection: HostConnectionLike,
   ) {
+    this.peer = connection.browserPeer
+    this.gateway = {
+      invoke: request => gateway.invoke({ ...request, peer: this.peer }),
+      wireStream: {
+        open: (endpoint, payload, _uplink, _peer, signal) => {
+          if (signal === undefined) throw new Error('browser bridge stream requires cancellation')
+          return openWireStream(gateway, endpoint, payload, signal, this.peer)
+        },
+        failure: error => gateway.wireStream.failure(error),
+      },
+    }
     this.fetchHandler = connection.createSharedFetchHandler('/api')
   }
 
@@ -320,7 +336,7 @@ class RemoteHostApi implements BrowserHostApi {
       }),
       signal,
     })
-    const response = await this.fetchHandler.fetch(request)
+    const response = await this.fetchHandler.fetch(request, this.peer)
     if (!response.ok) {
       throw new Error(`$events/result transport failed with HTTP ${String(response.status)}: ${await response.text()}`)
     }

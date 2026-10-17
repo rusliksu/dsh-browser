@@ -45,12 +45,21 @@ function harness(options: {
     },
   }
   const connection: HostConnectionLike = {
+    browserPeer: { principal: { kind: 'owner' } } as HostConnectionLike['browserPeer'],
     createSharedFetchHandler: () => ({ fetch }),
   }
   return { api: createRemoteHostApi(gateway, connection), invoke, open, fetch, requestBodies }
 }
 
 describe('dsh 0.2 Remote Host adapter', () => {
+  it('passes the authenticated browser Peer to unary Gateway calls', async () => {
+    const { api } = harness({ invoke: async request => {
+      expect(Reflect.get(request, 'peer')).toMatchObject({ principal: { kind: 'owner' } })
+      return { accepted: true }
+    } })
+    await expect(api.call(call('session.cancel', { sessionId: 'session-1' }))).resolves.toMatchObject({ ok: true })
+  })
+
   it.each([
     { next: { provider: 'session-provider', model: 'saved-model', reasoningEffort: 'high' }, routable: true },
     { next: { provider: 'removed-provider', model: 'saved-model' }, routable: false },
@@ -87,7 +96,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
   it('passes the signal in the fifth argument for DSH Desktop 2.x streams', async () => {
     const open = vi.fn(async (_endpoint: string, _payload: unknown, uplink: AsyncIterable<unknown>, peer: unknown, signal: AbortSignal) => {
       expect(typeof uplink[Symbol.asyncIterator]).toBe('function')
-      expect(peer).toBeUndefined()
+      expect(peer).toMatchObject({ principal: { kind: 'owner' } })
       expect(signal).toBeInstanceOf(AbortSignal)
       return { async *[Symbol.asyncIterator]() { yield { type: 'ready', clientId: 'test', host: {} }; await abortWait(signal) } }
     })
@@ -269,7 +278,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
     const abort = new AbortController()
     const events = api.events(abort.signal)[Symbol.asyncIterator]()
     const live = events.next()
-    await vi.waitFor(() => { expect(open).toHaveBeenCalledWith('$events', { args: {} }, expect.anything(), undefined, expect.any(AbortSignal)) })
+    await vi.waitFor(() => { expect(open).toHaveBeenCalledWith('$events', { args: {} }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' } }), expect.any(AbortSignal)) })
 
     await expect(api.call(call('session.history', {
       sessionId: 'session-1',
@@ -321,7 +330,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
           assistantStream: true,
         },
       },
-    }, expect.anything(), undefined, expect.any(AbortSignal))
+    }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' } }), expect.any(AbortSignal))
     abort.abort()
     await events.return?.()
   })
@@ -353,7 +362,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
           assistantStream: true,
         },
       },
-    }, expect.anything(), undefined, expect.any(AbortSignal))
+    }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' } }), expect.any(AbortSignal))
   })
 
   it('rejects invalid history pagination before calling the Host', async () => {
@@ -419,7 +428,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
     })
     expect(open).toHaveBeenCalledWith('session/follow', {
       args: { request: { address: { kind: 'session', sessionId: 'session-1' }, assistantStream: true } },
-    }, expect.anything(), undefined, expect.any(AbortSignal))
+    }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' } }), expect.any(AbortSignal))
     expect(invoke).toHaveBeenCalledOnce()
     const pageArgs = invoke.mock.calls[0]?.[0]?.args as { request: { throughSeq: number } }
     expect(pageArgs.request.throughSeq).toBe(42)
@@ -577,7 +586,7 @@ describe('dsh 0.2 Remote Host adapter', () => {
       ok: true,
       value: { items: [{ workspaceId: 'w1' }], archivedSessionIds: ['s1'] },
     })
-    expect(open).toHaveBeenCalledWith('workspace/follow', { args: {} }, expect.anything(), undefined, expect.any(AbortSignal))
+    expect(open).toHaveBeenCalledWith('workspace/follow', { args: {} }, expect.anything(), expect.objectContaining({ principal: { kind: 'owner' } }), expect.any(AbortSignal))
   })
 
   it('bridges user questions through $events/result and unwraps the extension answer', async () => {
