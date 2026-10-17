@@ -18,6 +18,7 @@ function stubContext(): Context {
     invoke: async () => undefined,
   }
   const connection = {
+    browserPeer: { principal: { kind: 'owner' } },
     createSharedFetchHandler: () => ({ fetch: async () => new Response('not found', { status: 404 }) }),
   }
   return {

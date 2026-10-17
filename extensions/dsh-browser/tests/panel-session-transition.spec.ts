@@ -14,7 +14,7 @@ vi.mock('../src/panel/api.ts', () => ({
 }))
 
 import { App } from '../src/panel/App.tsx'
-import { createRemoteHostApi } from '@yuxianglin/dsh-bridge-browser/src/remote-host-api.ts'
+import { createRemoteHostApi, type HostConnectionLike } from '@yuxianglin/dsh-bridge-browser/src/remote-host-api.ts'
 
 describe('panel session transitions', () => {
   let root: Root
@@ -114,7 +114,7 @@ describe('panel session transitions', () => {
         open: async () => { throw new Error('unexpected stream') },
         failure: (error) => ({ code: 'internal', message: String(error), details: {} }),
       },
-    }, { createSharedFetchHandler: () => ({ fetch: async () => { throw new Error('unexpected fetch') } }) })
+    }, { browserPeer: { principal: { kind: 'owner' } } as HostConnectionLike['browserPeer'], createSharedFetchHandler: () => ({ fetch: async () => { throw new Error('unexpected fetch') } }) })
     const original = rpc.getMockImplementation()!
     rpc.mockImplementation(async (method, payload) => {
       if (method !== 'session.models' && method !== 'session.selectModel') return original(method, payload)

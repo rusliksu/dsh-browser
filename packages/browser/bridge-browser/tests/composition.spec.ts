@@ -101,6 +101,7 @@ const RemoteApiHost = {
       },
     }
     const connection = {
+    browserPeer: { principal: { kind: 'owner' } },
       createSharedFetchHandler: () => ({
         fetch: async (request: Request) => {
           const envelope = await request.json() as { rpcId: string }
