@@ -44,6 +44,8 @@ export interface TypertGatewayLike {
     readonly method: string
     readonly args: Readonly<Record<string, unknown>>
     readonly signal?: AbortSignal
+    /** dsh 0.2.1+: unary calls also validate `request.peer` (assertPeerLive). */
+    readonly peer?: unknown
   }): Promise<unknown>
 }
 
@@ -55,6 +57,19 @@ export interface TypertGatewayLike {
 const EMPTY_WIRE_UPLINK: AsyncIterable<unknown> = {
   async *[Symbol.asyncIterator]() { /* no uplink items */ },
 }
+
+/**
+ * In-process Peer for Host wire streams.
+ *
+ * dsh 0.2.1 validates the peer slot on every wire-stream open: `assertPeerLive`
+ * reads `peer.signal` and `requireInteractions` demands `interactions === 'answer'`.
+ * Passing `undefined` therefore fails with
+ * "Cannot read properties of undefined (reading 'signal')" right after
+ * `hello.ok`, and the bridge closes the socket with `event stream failed`.
+ * `Connection.createPeer()` mints exactly such a Peer, so the bridge borrows one
+ * for the lifetime of the plugin instance.
+ */
+let hostPeer: unknown
 
 /**
  * Open a Host wire stream against either dsh 0.2 or the legacy three-arg form.
@@ -70,7 +85,7 @@ function openWireStream(gateway: TypertGatewayLike, endpoint: string, payload: u
   if (open.length === 3) {
     return open(endpoint, payload, signal)
   }
-  return open(endpoint, payload, EMPTY_WIRE_UPLINK, undefined, signal)
+  return open(endpoint, payload, EMPTY_WIRE_UPLINK, hostPeer, signal)
 }
 
 /** Structural subset of dsh 0.2's Host Connection service. */
@@ -78,6 +93,8 @@ export interface HostConnectionLike {
   createSharedFetchHandler(channel: '/api'): {
     fetch(request: Request): Promise<Response>
   }
+  /** dsh 0.2.1+: mint an in-process Peer (interactions default to "answer"). */
+  createPeer?(options?: { readonly principal?: unknown }): unknown
 }
 
 interface InvokeTarget {
@@ -107,6 +124,13 @@ export function createRemoteHostApi(
   gateway: TypertGatewayLike,
   connection: HostConnectionLike,
 ): BrowserHostApi {
+  // dsh 0.2.1 requires a live Peer on every wire-stream open; mint one up front so
+  // even the first `$events` open satisfies assertPeerLive/requireInteractions.
+  try {
+    hostPeer = connection.createPeer?.({ principal: { kind: 'owner' } })
+  } catch {
+    hostPeer = undefined
+  }
   return new RemoteHostApi(gateway, connection)
 }
 
@@ -144,7 +168,7 @@ class RemoteHostApi implements BrowserHostApi {
         namespace: target.namespace,
         method: target.method,
         args: target.args,
-        signal: call.signal,
+        signal: call.signal, peer: hostPeer,
       })
       // Only claim ownership after a successful create/prompt. A failed prompt
       // against a Desktop session must not steal later ask_user_question away
@@ -211,7 +235,7 @@ class RemoteHostApi implements BrowserHostApi {
               ...(maxMessages === undefined ? {} : { maxMessages }),
             },
           },
-          signal: call.signal,
+          signal: call.signal, peer: hostPeer,
         })
         return { ok: true, value: historyPageValue(page) }
       }
@@ -232,11 +256,11 @@ class RemoteHostApi implements BrowserHostApi {
     const sessionId = sessionIdOf(call.payload)
     try {
       const catalog = await this.gateway.invoke({
-        namespace: 'session', method: 'modelCatalog', args: {}, signal: call.signal,
+        namespace: 'session', method: 'modelCatalog', args: {}, signal: call.signal, peer: hostPeer,
       })
       // Provisional Sessions request only the catalog and overlay their pending choice.
       const projections = sessionId === undefined ? undefined : await this.gateway.invoke({
-        namespace: 'session', method: 'projections', args: { request: { sessionId } }, signal: call.signal,
+        namespace: 'session', method: 'projections', args: { request: { sessionId } }, signal: call.signal, peer: hostPeer,
       })
       const values = isRecord(projections) ? projections.values : undefined
       const modelSelection = isRecord(values) ? values.modelSelection : undefined
