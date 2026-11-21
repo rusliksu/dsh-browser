@@ -17,6 +17,8 @@ Pages become structured text with a numbered inventory of interactive elements. 
 
 The installer installs the bridge plugin and Chrome extension.
 
+Every extension connection requires a pairing key, including local Chrome connections. After installation, copy the key from `~/.dsh/ext-bridge-token` into the extension's Token setting. Automatic address discovery does not authenticate the extension.
+
 macOS and Linux:
 
 ```sh
@@ -129,7 +131,7 @@ From a source checkout, run `pnpm start` in the repository root. The exact suppo
 npx @deepseek-ai/dsh@0.2.2-rc.2 web
 ```
 
-Local Chrome use requires no configuration; Firefox requires the local bridge token described above. Open a page, click the DeepSeek whale icon, and wait for **Connected**. Existing HTTP(S) tabs are instrumented on the first action. On browser-protected pages and extension stores, the model can read tab metadata and use browser-level HTTP(S) navigation, back, forward, and reload, but it cannot inspect or operate the protected page DOM.
+Every connection requires the pairing key described above, in both Chrome and Firefox. Open a page, click the DeepSeek whale icon, and wait for **Connected**. Existing HTTP(S) tabs are instrumented on the first action. On browser-protected pages and extension stores, the model can read tab metadata and use browser-level HTTP(S) navigation, back, forward, and reload, but it cannot inspect or operate the protected page DOM.
 
 ## Troubleshooting
 

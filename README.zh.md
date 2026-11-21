@@ -17,6 +17,8 @@
 
 安装器会安装桥插件和 Chrome 扩展。
 
+所有扩展连接（包括本机 Chrome）都必须填写配对密钥：安装后把 `~/.dsh/ext-bridge-token` 中的密钥填入扩展的 Token 设置。自动地址发现不会认证扩展。
+
 macOS 与 Linux：
 
 ```sh
