@@ -28,6 +28,7 @@ import {
   BRIDGE_SESSION_PURGE_METHOD,
   HELLO_TIMEOUT_MS,
   PING_INTERVAL_MS,
+  isDevToolsCaps,
   parseBridgeFrame,
   type BridgeFrame,
   type BridgeCaps,
@@ -60,6 +61,7 @@ const PRIVILEGED_METHODS = new Set([
 const ORDERED_SESSION_METHODS = new Set([
   BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD,
   'session.prompt',
+  'session.state',
   'session.cancel',
 ])
 
@@ -89,6 +91,11 @@ export interface BridgeServerDeps {
   toolTimeoutMs: number
   /** Capabilities to echo in `hello.ok` (negotiated snapshot budgets). */
   caps: BridgeCaps
+  /**
+   * Called after each accepted `hello`, with the capabilities that connection
+   * advertised. The plugin re-evaluates the developer-tools tool group here.
+   */
+  onCapsChange?: (clientCaps: BridgeCaps) => void
   /** Seed a followed-page snapshot into a live or deferred Agent session. */
   injectBrowserSnapshot: (sessionId: string, snapshot: string) => void | Promise<void>
   /**
@@ -120,6 +127,8 @@ interface ReadyConnection {
   ws: WebSocket
   /** Remote address captured at upgrade time (loopback gate for privileged methods). */
   remoteAddress: string | undefined
+  /** Capabilities the extension advertised in its `hello`. */
+  clientCaps: BridgeCaps
   abort: AbortController
   pump: Promise<void>
   ping: NodeJS.Timeout
@@ -272,6 +281,15 @@ export class BridgeServer {
     return this.current !== null
   }
 
+  /**
+   * Whether the connected extension can serve the developer-tools group.
+   * Read by the plugin when it (re)registers that tool group.
+   * @returns true only for a live connection whose `hello` advertised devtools.
+   */
+  devToolsSupported(): boolean {
+    return isDevToolsCaps(this.current?.clientCaps.devTools)
+  }
+
   private attach(ws: WebSocket, remoteAddress: string | undefined): void {
     let helloTimer: NodeJS.Timeout | undefined = setTimeout(() => {
       ws.close(4001, 'hello timeout')
@@ -297,7 +315,7 @@ export class BridgeServer {
         }
         clearTimeout(helloTimer)
         helloTimer = undefined
-        this.promote(ws, remoteAddress)
+        this.promote(ws, remoteAddress, frame.caps)
         return
       }
       this.handleReadyFrame(frame)
@@ -312,7 +330,7 @@ export class BridgeServer {
   }
 
   /** Promote an authenticated socket to the single active slot. */
-  private promote(ws: WebSocket, remoteAddress: string | undefined): void {
+  private promote(ws: WebSocket, remoteAddress: string | undefined, clientCaps: BridgeCaps): void {
     this.replaceConnection()
     const abort = new AbortController()
     const ping = setInterval(() => { sendFrame(ws, { t: 'ping' }) }, this.deps.pingIntervalMs ?? PING_INTERVAL_MS)
@@ -335,8 +353,11 @@ export class BridgeServer {
         }
       }
     })()
-    this.current = { ws, remoteAddress, abort, pump, ping }
+    this.current = { ws, remoteAddress, clientCaps, abort, pump, ping }
     sendFrame(ws, { t: 'hello.ok', caps: this.deps.caps })
+    // Notify only after the new connection owns the slot, so a listener reading
+    // `devToolsSupported()` sees the capability that just arrived.
+    this.deps.onCapsChange?.(clientCaps)
     ws.once('close', () => {
       clearInterval(ping)
       abort.abort()
@@ -352,7 +373,7 @@ export class BridgeServer {
         void this.handleRespond(frame)
         break
       case 'tool.result':
-        this.settleTool(frame.id, frame.ok, frame.ok ? frame.result : frame.error)
+        this.settleTool(frame)
         break
       case 'pong':
       case 'hello':
@@ -479,13 +500,13 @@ export class BridgeServer {
     }
   }
 
-  private settleTool(id: string, ok: boolean, payload: unknown): void {
-    const pending = this.pendingTools.get(id)
+  private settleTool(frame: Extract<ClientFrame, { t: 'tool.result' }>): void {
+    const pending = this.pendingTools.get(frame.id)
     if (pending === undefined) return
     clearTimeout(pending.timer)
-    this.pendingTools.delete(id)
-    if (ok) pending.resolve(payload)
-    else pending.reject(new BridgeToolError(payloadCode(payload), payloadMessage(payload)))
+    this.pendingTools.delete(frame.id)
+    if (frame.ok) pending.resolve(frame.result)
+    else pending.reject(new BridgeToolError(frame.error.code, frame.error.message || 'browser action failed'))
   }
 
   /** Close the current connection (if any) and settle its in-flight calls. */
@@ -526,36 +547,4 @@ function orderedSessionId(frame: Extract<ClientFrame, { t: 'rpc' }>): string | u
   if (typeof frame.payload !== 'object' || frame.payload === null || Array.isArray(frame.payload)) return undefined
   const sessionId = (frame.payload as Record<string, unknown>).sessionId
   return typeof sessionId === 'string' ? sessionId : undefined
-}
-
-/**
- * Tool error payload → stable code. The wire parser enforces string fields,
- * so the fallback branches are parser-gated; exported so the fallback
- * contract is unit-testable directly.
- * @param payload - extension-reported error payload.
- * @returns the stable error code.
- */
-export function payloadCode(payload: unknown): ToolErrorCode {
-  if (typeof payload === 'object' && payload !== null) {
-    const code = (payload as { code?: unknown }).code
-    if (typeof code === 'string') return code as ToolErrorCode
-    return 'internal'
-  }
-  return 'internal'
-}
-
-/**
- * Tool error payload → message. The wire parser enforces string fields, so
- * the fallback branches are parser-gated; exported so the fallback contract
- * is unit-testable directly.
- * @param payload - extension-reported error payload.
- * @returns the human-readable message.
- */
-export function payloadMessage(payload: unknown): string {
-  if (typeof payload === 'object' && payload !== null) {
-    const message = (payload as { message?: unknown }).message
-    if (typeof message === 'string' && message.length > 0) return message
-    return 'browser action failed'
-  }
-  return 'browser action failed'
 }

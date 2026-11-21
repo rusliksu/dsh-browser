@@ -25,6 +25,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRegistry from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import LlmService, { createUserMessage, type GenerateOptions, type UserMessage } from '@deepseek-ai/dsh-llm'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -48,7 +49,7 @@ afterEach(async () => {
 })
 
 /**
- * Minimal structural implementation of the dsh 0.1.5 Host seams. Focused
+ * Minimal structural implementation of the dsh 0.2.1 Host seams. Focused
  * Remote-adapter tests pin the argument and stream contracts separately; this
  * fixture verifies Loader injection, real sockets, and real Session storage.
  */
@@ -58,7 +59,13 @@ const RemoteApiHost = {
   apply(ctx: Context, config: { cwd: string }): void {
     const gateway = {
       wireStream: {
-        async open(endpoint: string, _payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
+        async open(
+          endpoint: string,
+          _payload: unknown,
+          _uplink: AsyncIterable<unknown>,
+          _peer: unknown,
+          signal: AbortSignal,
+        ): Promise<AsyncIterable<unknown>> {
           if (endpoint === '$events') {
             return {
               async *[Symbol.asyncIterator]() {
@@ -77,7 +84,8 @@ const RemoteApiHost = {
           details: {},
         }),
       },
-      async invoke(request: { namespace: string; method: string; args: Record<string, unknown> }) {
+      async invoke(request: { namespace: string; method: string; args: Record<string, unknown>; peer: unknown }) {
+        if (request.peer === undefined) throw new Error('composition hosts must name the calling Peer')
         if (request.namespace === 'session' && request.method === 'create') {
           const payload = request.args.request as { sessionId?: string; cwd?: string }
           const session = ctx.sessions.create(
@@ -102,13 +110,24 @@ const RemoteApiHost = {
     }
     const connection = {
       createSharedFetchHandler: () => ({
-        fetch: async (request: Request) => {
+        fetch: async (request: Request, _peer: unknown) => {
           const envelope = await request.json() as { rpcId: string }
           return Response.json({
             type: 'server-response', rpcId: envelope.rpcId, result: { ok: true },
           })
         },
       }),
+      createPeer: (options: { principal: { kind: string }; interactions?: string }) => {
+        if (options.principal.kind !== 'owner') throw new Error('the bridge speaks for the local operator')
+        const lifetime = new AbortController()
+        return {
+          id: `peer-${crypto.randomUUID()}`,
+          principal: options.principal,
+          interactions: options.interactions ?? 'answer',
+          signal: lifetime.signal,
+          dispose: async () => { lifetime.abort(new Error('composition Peer disposed')) },
+        }
+      },
     }
     ctx.provide('typertGateway' as never, gateway as never)
     ctx.provide('connection' as never, connection as never)
@@ -131,6 +150,7 @@ async function loadComposition(): Promise<{ ctx: Context; configPath: string; po
     "- name: '@deepseek-ai/dsh-agent'",
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
+    "- name: '@deepseek-ai/dsh-tool-executor-native'",
     "- name: '@deepseek-ai/dsh-llm'",
     "- name: '@deepseek-ai/dsh-agent-loop'",
     `- name: '${apiHostName}'`,
@@ -158,6 +178,7 @@ async function loadComposition(): Promise<{ ctx: Context; configPath: string; po
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRegistry],
+    ['@deepseek-ai/dsh-tool-executor-native', NativeToolExecutor],
     ['@deepseek-ai/dsh-llm', LlmService],
     ['@deepseek-ai/dsh-agent-loop', AgentLoop],
     [apiHostName, RemoteApiHost],
@@ -323,6 +344,10 @@ describe('real Loader composition', () => {
     // The bridge plugin mounted the browser tool set on the real registry.
     const tools = ctx.get('tools') as ToolRegistry
     expect(tools.get('browser_snapshot')).toBeDefined()
+    // High-privilege developer tools stay unregistered until a connected
+    // extension advertises the capability.
+    expect(tools.get('browser_devtools_elements')).toBeUndefined()
+    expect(tools.get('browser_console_eval')).toBeUndefined()
 
     const browserPrompt = (await ctx.systemPrompt.assemble()).sections
       .find((section) => section.name === 'tool:bridge-browser')?.text
@@ -343,7 +368,9 @@ describe('real Loader composition', () => {
     const client = await connectReady(port)
     expect(client.frames.find((f) => f.t === 'hello.ok')).toEqual({
       t: 'hello.ok',
-      caps: { textOnly: true, snapshotMaxChars: 32_000, maxInteractiveItems: 60 },
+      // `devTools` is the host's offer; the extension's own hello decides
+      // whether the matching tool group is registered (asserted below).
+      caps: { textOnly: true, snapshotMaxChars: 32_000, maxInteractiveItems: 60, devTools: { version: 1 } },
     })
 
     // Gateway RPC round-trip against the real session store.
@@ -362,6 +389,41 @@ describe('real Loader composition', () => {
     expect(listedText).toContain(sessionId)
 
     client.ws.close()
+  })
+
+  it('registers the developer-tools group only for a capability-advertising extension', { timeout: 60_000 }, async () => {
+    const { ctx, port } = await loadComposition()
+    const tools = ctx.get('tools') as ToolRegistry
+    expect(tools.get('browser_devtools_elements')).toBeUndefined()
+
+    const capabilityClient = await connect(port)
+    send(capabilityClient.ws, {
+      t: 'hello',
+      token: '',
+      caps: {
+        textOnly: true,
+        snapshotMaxChars: 32_000,
+        maxInteractiveItems: 60,
+        devTools: { version: 1 },
+      },
+    })
+    await waitFor(() => tools.get('browser_devtools_elements') !== undefined)
+    expect(tools.get('browser_devtools_network')).toBeDefined()
+    expect(tools.get('browser_console_eval')).toBeDefined()
+    // The plugin echoes the negotiated developer-tools capability back.
+    await waitFor(() => capabilityClient.frames.some((frame) => frame.t === 'hello.ok'))
+    const ack = capabilityClient.frames.find((frame) => frame.t === 'hello.ok')
+    expect(ack).toMatchObject({ caps: { devTools: { version: 1 } } })
+
+    // A reconnect without the capability retracts the whole group.
+    const legacyClient = await connectReady(port)
+    await waitFor(() => tools.get('browser_devtools_elements') === undefined)
+    expect(tools.get('browser_console_eval')).toBeUndefined()
+    // The baseline set is untouched by the retraction.
+    expect(tools.get('browser_snapshot')).toBeDefined()
+
+    capabilityClient.ws.close()
+    legacyClient.ws.close()
   })
 
   it('unregisters the browser tools when the bridge fiber disposes (HMR safety)', { timeout: 60_000 }, async () => {

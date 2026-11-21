@@ -2,8 +2,13 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
-import { BridgeServer, BridgeToolError, isLoopbackAddress, messageToText, payloadCode, payloadMessage } from '../src/server.ts'
-import { BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD, BRIDGE_SESSION_PURGE_METHOD, type BridgeFrame } from '../src/protocol.ts'
+import { BridgeServer, BridgeToolError, isLoopbackAddress, messageToText } from '../src/server.ts'
+import {
+  BRIDGE_INJECT_BROWSER_SNAPSHOT_METHOD,
+  BRIDGE_SESSION_PURGE_METHOD,
+  DEVTOOLS_CAPS_VERSION,
+  type BridgeFrame,
+} from '../src/protocol.ts'
 import { SessionPurgeError } from '../src/session-purge.ts'
 import type { BrowserHostApi, HostEventFrame } from '../src/host-api.ts'
 
@@ -108,15 +113,29 @@ describe('BridgeServer', () => {
     expect(messageToText(new TextEncoder().encode('x').buffer)).toBe('x')
   })
 
-  it('extracts tool error codes and messages with parser-gated fallbacks', () => {
-    expect(payloadCode({ code: 'timeout', message: 'm' })).toBe('timeout')
-    expect(payloadCode({ code: 42, message: 'm' })).toBe('internal')
-    expect(payloadCode('garbage')).toBe('internal')
-    expect(payloadCode(null)).toBe('internal')
-    expect(payloadMessage({ code: 'x', message: 'm' })).toBe('m')
-    expect(payloadMessage({ code: 'x', message: '' })).toBe('browser action failed')
-    expect(payloadMessage({ code: 'x', message: 42 })).toBe('browser action failed')
-    expect(payloadMessage('garbage')).toBe('browser action failed')
+  it('reports negotiated developer-tools support and notifies on each hello', async () => {
+    const onCapsChange = vi.fn()
+    const h = await startBridge({ onCapsChange })
+    // No connection yet: the capability is unsupported.
+    expect(h.bridge.devToolsSupported()).toBe(false)
+
+    const ws = new WebSocket(h.url, { headers: { origin: EXT_ORIGIN } })
+    const frames: BridgeFrame[] = []
+    ws.on('message', (data) => { frames.push(JSON.parse(String(data)) as BridgeFrame) })
+    await waitFor(() => ws.readyState === WebSocket.OPEN)
+    send(ws, { t: 'hello', token: TOKEN, caps: { ...CAPS, devTools: { version: DEVTOOLS_CAPS_VERSION } } })
+    await waitFor(() => frames.some((frame) => frame.t === 'hello.ok'))
+    expect(onCapsChange).toHaveBeenCalledWith(expect.objectContaining({ devTools: { version: DEVTOOLS_CAPS_VERSION } }))
+    expect(h.bridge.devToolsSupported()).toBe(true)
+
+    // A reconnecting extension without the capability retracts it again.
+    const legacy = new WebSocket(h.url, { headers: { origin: EXT_ORIGIN } })
+    await waitFor(() => legacy.readyState === WebSocket.OPEN)
+    send(legacy, { t: 'hello', token: TOKEN, caps: CAPS })
+    await waitFor(() => h.bridge.devToolsSupported() === false)
+    expect(onCapsChange).toHaveBeenLastCalledWith(CAPS)
+    ws.close()
+    legacy.close()
   })
 
   it('authenticates a valid hello and acknowledges caps', async () => {
@@ -504,7 +523,10 @@ describe('BridgeServer', () => {
     ws.close()
   })
 
-  it('propagates extension-reported tool errors', async () => {
+  it.each([
+    ['blocked', 'blocked'],
+    ['', 'browser action failed'],
+  ])('propagates the extension-reported tool error %j', async (message, expectedMessage) => {
     const h = await startBridge()
     harnesses.push(h)
     const { ws, frames } = await connect(h.url)
@@ -513,9 +535,9 @@ describe('BridgeServer', () => {
     const result = h.bridge.requestTool('browser_navigate', { url: 'https://x' }, new AbortController().signal)
     await waitFor(() => frames.some((f) => f.t === 'tool.call'))
     const call = frames.find((f) => f.t === 'tool.call') as Extract<BridgeFrame, { t: 'tool.call' }>
-    send(ws, { t: 'tool.result', id: call.id, ok: false, error: { code: 'action-failed', message: 'blocked' } })
+    send(ws, { t: 'tool.result', id: call.id, ok: false, error: { code: 'action-failed', message } })
     await expect(result).rejects.toBeInstanceOf(BridgeToolError)
-    await expect(result).rejects.toMatchObject({ code: 'action-failed', message: 'blocked' })
+    await expect(result).rejects.toMatchObject({ code: 'action-failed', message: expectedMessage })
     ws.close()
   })
 
