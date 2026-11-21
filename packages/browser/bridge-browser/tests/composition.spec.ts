@@ -399,7 +399,7 @@ describe('real Loader composition', () => {
     const capabilityClient = await connect(port)
     send(capabilityClient.ws, {
       t: 'hello',
-      token: '',
+      token: TOKEN,
       caps: {
         textOnly: true,
         snapshotMaxChars: 32_000,

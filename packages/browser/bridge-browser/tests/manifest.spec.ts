@@ -33,7 +33,7 @@ describe('plugin manifest', () => {
     const peers = manifest.peerDependencies as Record<string, string>
     const dshPeers = Object.keys(peers).filter(name => name.startsWith('@deepseek-ai/dsh'))
     expect(dshPeers.length).toBeGreaterThan(0)
-    for (const name of dshPeers) expect(peers[name]).toBe('0.2.2-rc.2')
+    for (const name of dshPeers) expect(peers[name]).toBe('>=0.1.7-rc.2 <0.3.0')
   })
 
   it('publishes the resources the Plugins page reads', () => {
